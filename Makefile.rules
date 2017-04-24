@@ -1,0 +1,40 @@
+#
+# Copyright 2017 International Business Machines
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+# Basic makefile rules
+-include $(OBJS:.o=.d)
+
+ifdef V
+  VERBOSE:= $(V)
+else
+  VERBOSE:= 0
+endif
+
+ifeq ($(VERBOSE),1)
+define Q
+  $(2)
+endef
+else
+define Q
+  @/bin/echo -e "	[$1]\t$(3)"
+  @$(2)
+endef
+endif
+
+%.o : %.c
+	$(call Q,CC, $(CC) $(CFLAGS) -c -o $@ $<, $@)
+	$(call Q,CC, $(CC) -MM $(CFLAGS) $^ > $*.d, $*.d)
+	$(call Q,SED, sed -i -e "s#^$(@F)#$@#" $*.d, $*.d)
