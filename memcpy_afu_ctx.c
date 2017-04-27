@@ -49,6 +49,7 @@
 /* Default amount of time to wait (in seconds) for a test to complete */
 #define TIMEOUT		120
 #define KILL_TIMEOUT	5
+#define COMPLETION_TIMEOUT     TIMEOUT
 
 static void get_name(char **name, int processes, int loops)
 {
@@ -68,6 +69,7 @@ struct memcpy_test_args {
 	int stop_flag;
 	int timebase_flag;
 	int card;
+	int completion_timeout;
 };
 
 int set_afu_master_psa_registers(struct memcpy_test_args *args)
@@ -207,12 +209,12 @@ int test_afu_memcpy(char *src, char *dst, size_t size, int count,
 
 	int process_handle_ioctl;
 	pid_t pid;
-	int afu_fd, i, j, ret = 0, t;
+	int afu_fd, i, ret = 0, t;
 	struct memcpy_weq weq;
 	struct memcpy_work_element memcpy_we, irq_we, *queued_we;
 	struct cxl_event event;
 	struct timeval timeout;
-	struct timeval start, end;
+	struct timeval start, end, temp;
 	fd_set set;
 	char *cxldev;
 
@@ -351,13 +353,21 @@ int test_afu_memcpy(char *src, char *dst, size_t size, int count,
 
 		/* We have to do this even for the interrupt driven case because we need
 		 * to wait for this flag before setting the completion bit. */
-		for (j = 100000000;
-		     j > 0 && !(queued_we->status & MEMCPY_WE_STAT_COMPLETE); j--) {
-			/* Empty body */
-		}
+		gettimeofday(&timeout, NULL); /* reuse timeout */
+		temp.tv_sec = args->completion_timeout;
+		temp.tv_usec = 0;
+		timeradd(&timeout, &temp, &timeout);
+		for (;; gettimeofday(&temp, NULL)) {
+			if (timercmp(&temp, &timeout, >)) {
+				printf("# Timeout polling for completion\n");
+				break;
+			}
 
-		if (j == 0)
-			printf("# Timeout polling for completion\n");
+			if (queued_we->status & MEMCPY_WE_STAT_COMPLETE) {
+				/* Success */
+				break;
+			}
+		}
 
 		ret |= memcmp(dst, src, size) == 0 ? 0 : ERR_MEMCMP;
 		if (ret) {
@@ -434,6 +444,9 @@ static void usage()
 	fprintf(stderr,
 	        "\t-s <bufsize>\tCopy this number of bytes (default 1024).\n");
 	fprintf(stderr, "\t-t\t\tDo not memcpy. Test timebase sync instead.\n");
+	fprintf(stderr,
+	        "\t-e <timeout>\t\tEnd timeout.\n"
+			"\t\t\tSeconds to wait for the AFU to signal completion.\n");
 	exit(2);
 }
 
@@ -450,10 +463,11 @@ int main(int argc, char *argv[])
 		.stop_flag = 0,
 		.timebase_flag = 0,
 		.card = 0,
+		.completion_timeout = COMPLETION_TIMEOUT,
 	};
 
 	while (1) {
-		c = getopt(argc, argv, "+hktp:l:s:i:I:c:");
+		c = getopt(argc, argv, "+hktp:l:s:i:I:c:e:");
 		if (c < 0)
 			break;
 		switch (c) {
@@ -489,6 +503,10 @@ int main(int argc, char *argv[])
 			break;
 		case 'c':
 			args.card = atoi(optarg);
+			break;
+		case 'e':
+			/* end timeout */
+			args.completion_timeout = atoi(optarg);
 			break;
 		}
 	}
