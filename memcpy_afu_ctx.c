@@ -47,9 +47,8 @@
 #define ERR_MEMCMP	0x4
 
 /* Default amount of time to wait (in seconds) for a test to complete */
-#define TIMEOUT		120
 #define KILL_TIMEOUT	5
-#define COMPLETION_TIMEOUT     TIMEOUT
+#define COMPLETION_TIMEOUT     120
 
 static void get_name(char **name, int processes, int loops)
 {
