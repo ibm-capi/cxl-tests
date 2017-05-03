@@ -44,7 +44,7 @@ Usage
     $ ./libcxl_tests        # Test libcxl
     $ ./memcpy_afu_ctx      # Test memcpy AFU memory copy
     $ ./memcpy_afu_ctx -t   # Test memcpy AFU timebase sync
-    
+
     Usage: memcpy_afu_ctx [options]
     Options:
         -c <card_num>   Use this CAPI card (default 0).
@@ -56,6 +56,8 @@ Usage
         -p <procs>      Fork this number of processes (default 1).
         -s <bufsize>    Copy this number of bytes (default 1024).
         -t              Do not memcpy. Test timebase sync instead.
+        -e              End timeout.
+                        Seconds to wait for the AFU to signal completion.
 
 Contributing
 ------------
