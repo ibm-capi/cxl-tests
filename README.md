@@ -56,7 +56,7 @@ Usage
         -p <procs>      Fork this number of processes (default 1).
         -s <bufsize>    Copy this number of bytes (default 1024).
         -t              Do not memcpy. Test timebase sync instead.
-        -e              End timeout.
+        -e <timeout>    End timeout.
                         Seconds to wait for the AFU to signal completion.
 
 Contributing
