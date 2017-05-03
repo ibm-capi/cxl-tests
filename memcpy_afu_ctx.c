@@ -362,8 +362,7 @@ int test_afu_memcpy(char *src, char *dst, size_t size, int count,
 				break;
 			}
 
-			if (queued_we->status & MEMCPY_WE_STAT_COMPLETE) {
-				/* Success */
+			if (queued_we->status) {
 				break;
 			}
 		}
