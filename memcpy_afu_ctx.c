@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#define _BSD_SOURCE
+#define _DEFAULT_SOURCE
 #define __STDC_FORMAT_MACROS
 #define _ISOC11_SOURCE
 #define _GNU_SOURCE

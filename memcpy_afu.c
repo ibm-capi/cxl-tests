@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#define _BSD_SOURCE
+#define _DEFAULT_SOURCE
 #define __STDC_FORMAT_MACROS
 #define _XOPEN_SOURCE /* For ipc.h */
 #define _ISOC11_SOURCE
