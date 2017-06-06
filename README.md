@@ -44,6 +44,7 @@ Usage
     $ ./libcxl_tests        # Test libcxl
     $ ./memcpy_afu_ctx      # Test memcpy AFU memory copy
     $ ./memcpy_afu_ctx -t   # Test memcpy AFU timebase sync
+    $ ./cxl_eeh_tests.sh    # Test device reset and recovery
 
     Usage: memcpy_afu_ctx [options]
     Options:
@@ -58,6 +59,10 @@ Usage
         -t              Do not memcpy. Test timebase sync instead.
         -e <timeout>    End timeout.
                         Seconds to wait for the AFU to signal completion.
+
+    Usage: cxl_eeh_tests.sh [options]
+    Options:
+        -c <card_num>   Use this CAPI card (default 0).
 
 Contributing
 ------------
