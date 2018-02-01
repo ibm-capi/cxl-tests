@@ -67,6 +67,7 @@ struct memcpy_test_args {
 	int irq_count;
 	int stop_flag;
 	int timebase_flag;
+	int increment_flag;
 	int card;
 	int completion_timeout;
 };
@@ -211,6 +212,7 @@ int test_afu_memcpy(char *src, char *dst, size_t size, int count,
 	int afu_fd, i, ret = 0, t;
 	struct memcpy_weq weq;
 	struct memcpy_work_element memcpy_we, irq_we, *queued_we;
+	struct memcpy_work_element increment_we;
 	struct cxl_event event;
 	struct timeval timeout;
 	struct timeval start, end, temp;
@@ -237,7 +239,14 @@ int test_afu_memcpy(char *src, char *dst, size_t size, int count,
 	wed = MEMCPY_WED(weq.queue, QUEUE_SIZE/CACHELINESIZE);
 	printf("# WED = 0x%llx for PID = %d\n", (unsigned long long)wed, pid);
 
-	/* Setup a work element in the queue */
+	/* Setup the increment work element.  */
+	increment_we.cmd = MEMCPY_WE_CMD(0, MEMCPY_WE_CMD_INCR);
+	increment_we.status = 0;
+	increment_we.length = htobe16((uint16_t)sizeof(pid_t));
+	increment_we.src = htobe64((uintptr_t)src);
+	increment_we.dst = htobe64((uintptr_t)dst);
+
+	/* Setup the memcpy work element */
 	memcpy_we.cmd = MEMCPY_WE_CMD(0, MEMCPY_WE_CMD_COPY);
 	memcpy_we.status = 0;
 	memcpy_we.length = htobe16((uint16_t)size);
@@ -303,17 +312,24 @@ int test_afu_memcpy(char *src, char *dst, size_t size, int count,
 	assert(process_handle_memcpy == process_handle_ioctl);
 
 	/* Initialise source buffer with unique(ish) per-process value */
-	for (i = 0; i < size; i++)
-		*(src + i) = pid & 0xff;
+	if (args->increment_flag) {
+		*(pid_t *)src = htobe32(pid - 1);
+	} else {
+		for (i = 0; i < size; i++)
+			*(src + i) = pid & 0xff;
+	}
 
 	FD_ZERO(&set);
 	FD_SET(afu_fd, &set);
-
 	gettimeofday(&start, NULL);
 
 	for (i = 0; i < count; i++) {
 		ret = 0;
-		queued_we = memcpy_add_we(&weq, memcpy_we);
+		if (args->increment_flag){
+			*(pid_t *)src = htobe32(be32toh(*(pid_t *)src) + 1);
+			queued_we = memcpy_add_we(&weq, increment_we);
+		} else
+			queued_we = memcpy_add_we(&weq, memcpy_we);
 		if (args->irq)
 			memcpy_add_we(&weq, irq_we);
 		queued_we->cmd |= MEMCPY_WE_CMD_VALID;
@@ -366,8 +382,13 @@ int test_afu_memcpy(char *src, char *dst, size_t size, int count,
 				break;
 			}
 		}
-
-		ret |= memcmp(dst, src, size) == 0 ? 0 : ERR_MEMCMP;
+		if (args->increment_flag) {
+			printf("src=%u dst=%u\n", be32toh(*(pid_t *)src),
+			        be32toh(*(pid_t *)dst));
+			ret |= be32toh(*(pid_t *)dst)-be32toh(*(pid_t *)src)-1;
+		} else {
+			ret |= memcmp(dst, src, size) == 0 ? 0 : ERR_MEMCMP;
+		}
 		if (ret) {
 			printf("# Error on loop %d\n", i);
 			break;
@@ -402,17 +423,18 @@ int run_tests(void *argp)
 	src = aligned_alloc(CACHELINESIZE/2, buflen);
 	dst = aligned_alloc(CACHELINESIZE/2, buflen);
 
-	printf("# Starting %d processes doing %d memcpy loops\n", processes, loops);
+	printf("# Starting %d processes doing %d %s loops\n", processes, loops,
+	       args->increment_flag ? "increment" : "memcpy");
 	printf("# Queue size: %dkB, Queue length: %d\n", QUEUE_SIZE/1024,
 	       memcpy_queue_length(QUEUE_SIZE));
 	printf("# src: %p dst: %p\n", src, dst);
-	for(i = 0; i < processes; i++) {
+	for (i = 0; i < processes; i++) {
 		if (!fork())
 			/* Child process */
 			exit(test_afu_memcpy(src, dst, buflen, loops, args));
 	}
 
-	for(i = 0; i < processes; i++) {
+	for (i = 0; i < processes; i++) {
 		pid = wait(&j);
 		if (pid && j) {
 			printf("# Error copying for PID = %d\n", pid);
@@ -427,7 +449,10 @@ static void usage()
 {
 	fprintf(stderr, "Usage: memcpy_afu_ctx [options]\n");
 	fprintf(stderr, "Options:\n");
+	fprintf(stderr, "\t-a\t\tAdd 1. Do not memcpy. Test increment instead.\n");
 	fprintf(stderr, "\t-c <card_num>\tUse this CAPI card (default 0).\n");
+	fprintf(stderr, "\t-e <timeout>\tEnd timeout.\n"
+			"\t\t\tSeconds to wait for the AFU to signal completion.\n");
 	fprintf(stderr, "\t-h\t\tDisplay this help text.\n");
 	fprintf(stderr,
 	        "\t-I <irq_count>\tDefine this number of interrupts (default 4).\n");
@@ -441,10 +466,7 @@ static void usage()
 	        "\t-p <procs>\tFork this number of processes (default 1).\n");
 	fprintf(stderr,
 	        "\t-s <bufsize>\tCopy this number of bytes (default 1024).\n");
-	fprintf(stderr, "\t-t\t\tDo not memcpy. Test timebase sync instead.\n");
-	fprintf(stderr,
-	        "\t-e <timeout>\t\tEnd timeout.\n"
-			"\t\t\tSeconds to wait for the AFU to signal completion.\n");
+	fprintf(stderr, "\t-t\t\tTimebase. Do not memcpy. Test timebase sync instead.\n");
 	exit(2);
 }
 
@@ -460,18 +482,22 @@ int main(int argc, char *argv[])
 		.irq_count = -1,
 		.stop_flag = 0,
 		.timebase_flag = 0,
+		.increment_flag = 0,
 		.card = 0,
 		.completion_timeout = COMPLETION_TIMEOUT,
 	};
 
 	while (1) {
-		c = getopt(argc, argv, "+hktp:l:s:i:I:c:e:");
+		c = getopt(argc, argv, "+ahktp:l:s:i:I:c:e:");
 		if (c < 0)
 			break;
 		switch (c) {
 		case '?':
 		case 'h':
 			usage();
+			break;
+		case 'a':
+			args.increment_flag = 1;
 			break;
 		case 'k':
 			/* This arg is to change the behavior of MCP.

@@ -35,6 +35,7 @@ struct memcpy_work_element {
 	 (((cmd) & 0x3f) << 0))
 #define MEMCPY_WE_CMD_COPY	0
 #define MEMCPY_WE_CMD_IRQ	1
+#define MEMCPY_WE_CMD_INCR	4
 #define MEMCPY_WE_STAT_COMPLETE		0x80
 #define MEMCPY_WE_STAT_TRANS_FAULT	0x40
 #define MEMCPY_WE_STAT_AERROR		0x20
