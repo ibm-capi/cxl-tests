@@ -45,6 +45,7 @@
 #define ERR_IRQTIMEOUT	0x1
 #define ERR_EVENTFAIL	0x2
 #define ERR_MEMCMP	0x4
+#define ERR_INCR	0x8
 
 /* Default amount of time to wait (in seconds) for a test to complete */
 #define KILL_TIMEOUT	5
@@ -221,6 +222,23 @@ int test_afu_timebase(struct cxl_afu_h *afu_h, int count, __u64 ticks_per_sec)
 		usleep(1000000);
 	}
 	return 0;
+}
+
+static void decode_we_status(int ret) {
+	if (ret & MEMCPY_WE_STAT_TRANS_FAULT)
+		fprintf(stderr, "Error: Translation Fault \"Continue\"\n");
+	if (ret & MEMCPY_WE_STAT_AERROR)
+		fprintf(stderr, "Error: Aerror\n");
+	if (ret & MEMCPY_WE_STAT_DERROR)
+		fprintf(stderr, "Error: Derror\n");
+	if (ret & MEMCPY_WE_STAT_PSL_FAULT)
+		fprintf(stderr, "Error: PSL Fault response\n");
+	if (ret & MEMCPY_WE_STAT_INV_SRC)
+		fprintf(stderr, "Error: Invalid interrupt source number\n");
+	if (ret & MEMCPY_WE_STAT_PROC_TERM)
+		fprintf(stderr, "Error: Process terminated\\n");
+	if (ret & MEMCPY_WE_STAT_UNDEF_CMD)
+		fprintf(stderr, "Error: Undefined Cmd or CAS_INV response\n");
 }
 
 int test_afu_memcpy(char *src, char *dst, size_t size, int count,
@@ -406,13 +424,16 @@ int test_afu_memcpy(char *src, char *dst, size_t size, int count,
 			}
 
 			if (queued_we->status) {
+				if (ret != MEMCPY_WE_STAT_COMPLETE)
+					decode_we_status(ret);
 				break;
 			}
 		}
 		if (args->increment_flag) {
 			printf("src=%u dst=%u\n", be32toh(*(pid_t *)src),
 			        be32toh(*(pid_t *)dst));
-			ret |= be32toh(*(pid_t *)dst)-be32toh(*(pid_t *)src)-1;
+			ret |= be32toh(*(pid_t *)dst)
+			     - be32toh(*(pid_t *)src) == 1 ? 0 : ERR_INCR;
 		} else {
 			ret |= memcmp(dst, src, size) == 0 ? 0 : ERR_MEMCMP;
 		}
