@@ -70,7 +70,24 @@ struct memcpy_test_args {
 	int increment_flag;
 	int card;
 	int completion_timeout;
+	long int caia_major;
 };
+
+static int skip_process_element(struct memcpy_test_args *args, int pe)
+{
+	if (args->caia_major == 2) {
+		switch (pe % 4) {
+		case 0:	/* CT port */
+		case 2: /* DMA port 1 */
+		case 3: /* Reserved */
+			return 1;
+			break;
+		case 1: /* DMA port 0 -- supported */
+			break;
+		}
+	}
+	return 0;
+}
 
 int set_afu_master_psa_registers(struct memcpy_test_args *args)
 {
@@ -78,6 +95,7 @@ int set_afu_master_psa_registers(struct memcpy_test_args *args)
 	struct cxl_ioctl_start_work *work;
 	__be64 reg_data;
 	char *cxldev;
+	int process_element;
 	int rc = 0;
 
 	/* now that the AFU is started, lets set config options */
@@ -85,13 +103,18 @@ int set_afu_master_psa_registers(struct memcpy_test_args *args)
 		fprintf(stderr, "Out of memory\n");
 		return 1;
 	}
-	afu_master_h = cxl_afu_open_dev(cxldev);
-	if (afu_master_h == NULL) {
-		fprintf(stderr, "Unable to open AFU Master cxl device %s: %d\n",
-			cxldev, errno);
-		free(cxldev);
-		return 1;
-	}
+
+	do {
+		afu_master_h = cxl_afu_open_dev(cxldev);
+		if (afu_master_h == NULL) {
+			fprintf(stderr, "Unable to open AFU Master cxl device %s: %d\n",
+				cxldev, errno);
+			free(cxldev);
+			return 1;
+		}
+		process_element = cxl_afu_get_process_element(afu_master_h);
+	} while (skip_process_element(args, process_element));
+
 	work = cxl_work_alloc();
 	if (work == NULL) {
 		perror("cxl_work_alloc");
@@ -224,22 +247,27 @@ int test_afu_memcpy(char *src, char *dst, size_t size, int count,
 		fprintf(stderr, "Out of memory\n");
 		return 1;
 	}
-	afu_h = cxl_afu_open_dev(cxldev);
-	if (afu_h == NULL) {
-		fprintf(stderr, "Unable to open cxl device %s: %d\n",
-			cxldev, errno);
-		ret = 1;
-		goto err1;
-	}
-	afu_fd = cxl_afu_fd(afu_h);
 
+	do {
+		afu_h = cxl_afu_open_dev(cxldev);
+		if (afu_h == NULL) {
+			fprintf(stderr, "Unable to open cxl device %s: %d\n",
+				cxldev, errno);
+			ret = 1;
+			goto err1;
+		}
+		process_handle_ioctl = cxl_afu_get_process_element(afu_h);
+	} while (skip_process_element(args, process_handle_ioctl));
+
+	afu_fd = cxl_afu_fd(afu_h);
 	memcpy_init_weq(&weq, QUEUE_SIZE);
 
 	/* Point the work element descriptor (wed) at the weq */
 	wed = MEMCPY_WED(weq.queue, QUEUE_SIZE/CACHELINESIZE);
-	printf("# WED = 0x%llx for PID = %d\n", (unsigned long long)wed, pid);
+	printf("# WED = 0x%llx for PID = %d via PE = %d\n",
+               (unsigned long long)wed, pid, process_handle_ioctl);
 
-	/* Setup the increment work element.  */
+	/* Setup the increment work element */
 	increment_we.cmd = MEMCPY_WE_CMD(0, MEMCPY_WE_CMD_INCR);
 	increment_we.status = 0;
 	increment_we.length = htobe16((uint16_t)sizeof(pid_t));
@@ -282,7 +310,6 @@ int test_afu_memcpy(char *src, char *dst, size_t size, int count,
 		ret = 1;
 		goto err2;
 	}
-	process_handle_ioctl = cxl_afu_get_process_element(afu_h);
 	if (process_handle_ioctl < 0) {
 		perror("process_handle_ioctl");
 		ret = 1;
@@ -407,6 +434,38 @@ err1:
 	return ret;
 }
 
+static int get_caia_major(struct memcpy_test_args *args)
+{
+	struct cxl_adapter_h *adapter;
+	char *name;
+	long caia_minor;
+	int card_num;
+
+	/* get caia version of adapter */
+	cxl_for_each_adapter(adapter) {
+		name = cxl_adapter_dev_name(adapter);
+		sscanf(name, "card%d", &card_num);
+		if (card_num == args->card) {
+			if (cxl_get_caia_version(adapter, &args->caia_major,
+						 &caia_minor)) {
+				perror("cxl_get_caia_version");
+				return 1;
+			}
+			break;
+		}
+	}
+	if (errno) {
+		perror("cxl_for_each_adapter");
+		return 1;
+	}
+	if (card_num != args->card) {
+		fprintf(stderr, "/sys/class/cxl/card%d: no such cxl card\n",
+			args->card);
+		return 1;
+	}
+	return 0;
+}
+
 int run_tests(void *argp)
 {
 	struct memcpy_test_args *args = argp;
@@ -417,11 +476,15 @@ int run_tests(void *argp)
 	char *src, *dst;
 	pid_t pid;
 
-	set_afu_master_psa_registers(args);
+	if (get_caia_major(args))
+		return 1;
+
+	if (set_afu_master_psa_registers(args))
+		return 1;
 
 	/* Allocate memory areas for afu to copy to/from */
-	src = aligned_alloc(CACHELINESIZE/2, buflen);
-	dst = aligned_alloc(CACHELINESIZE/2, buflen);
+	src = aligned_alloc(CACHELINESIZE, buflen);
+	dst = aligned_alloc(CACHELINESIZE, buflen);
 
 	printf("# Starting %d processes doing %d %s loops\n", processes, loops,
 	       args->increment_flag ? "increment" : "memcpy");
@@ -485,6 +548,7 @@ int main(int argc, char *argv[])
 		.increment_flag = 0,
 		.card = 0,
 		.completion_timeout = COMPLETION_TIMEOUT,
+		.caia_major = 0,
 	};
 
 	while (1) {
