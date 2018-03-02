@@ -504,6 +504,8 @@ int run_tests(void *argp)
 		return 1;
 
 	/* Allocate memory areas for afu to copy to/from */
+	if (args->caia_major == 2 && buflen > 128)
+		buflen = 128;	/* MemCpy AFU v2 restriction */
 	src = aligned_alloc(CACHELINESIZE, buflen);
 	dst = aligned_alloc(CACHELINESIZE, buflen);
 
@@ -549,7 +551,8 @@ static void usage()
 	fprintf(stderr,
 	        "\t-p <procs>\tFork this number of processes (default 1).\n");
 	fprintf(stderr,
-	        "\t-s <bufsize>\tCopy this number of bytes (default 1024).\n");
+		"\t-s <bufsize>\tCopy this number of bytes (default 1024).\n"
+		"\t\t\tBuffer size limited to 128 for MemCpy 2.0 AFU for PSL9.\n");
 	fprintf(stderr, "\t-t\t\tTimebase. Do not memcpy. Test timebase sync instead.\n");
 	exit(2);
 }
