@@ -45,6 +45,7 @@
 #define ERR_IRQTIMEOUT	0x1
 #define ERR_EVENTFAIL	0x2
 #define ERR_MEMCMP	0x4
+#define ERR_INCR	0x8
 
 /* Default amount of time to wait (in seconds) for a test to complete */
 #define KILL_TIMEOUT	5
@@ -67,9 +68,27 @@ struct memcpy_test_args {
 	int irq_count;
 	int stop_flag;
 	int timebase_flag;
+	int increment_flag;
 	int card;
 	int completion_timeout;
+	long int caia_major;
 };
+
+static int skip_process_element(struct memcpy_test_args *args, int pe)
+{
+	if (args->caia_major == 2) {
+		switch (pe % 4) {
+		case 0:	/* CT port */
+		case 2: /* DMA port 1 */
+		case 3: /* Reserved */
+			return 1;
+			break;
+		case 1: /* DMA port 0 -- supported */
+			break;
+		}
+	}
+	return 0;
+}
 
 int set_afu_master_psa_registers(struct memcpy_test_args *args)
 {
@@ -77,6 +96,7 @@ int set_afu_master_psa_registers(struct memcpy_test_args *args)
 	struct cxl_ioctl_start_work *work;
 	__be64 reg_data;
 	char *cxldev;
+	int process_element;
 	int rc = 0;
 
 	/* now that the AFU is started, lets set config options */
@@ -84,13 +104,18 @@ int set_afu_master_psa_registers(struct memcpy_test_args *args)
 		fprintf(stderr, "Out of memory\n");
 		return 1;
 	}
-	afu_master_h = cxl_afu_open_dev(cxldev);
-	if (afu_master_h == NULL) {
-		fprintf(stderr, "Unable to open AFU Master cxl device %s: %d\n",
-			cxldev, errno);
-		free(cxldev);
-		return 1;
-	}
+
+	do {
+		afu_master_h = cxl_afu_open_dev(cxldev);
+		if (afu_master_h == NULL) {
+			fprintf(stderr, "Unable to open AFU Master cxl device %s: %d\n",
+				cxldev, errno);
+			free(cxldev);
+			return 1;
+		}
+		process_element = cxl_afu_get_process_element(afu_master_h);
+	} while (skip_process_element(args, process_element));
+
 	work = cxl_work_alloc();
 	if (work == NULL) {
 		perror("cxl_work_alloc");
@@ -199,6 +224,23 @@ int test_afu_timebase(struct cxl_afu_h *afu_h, int count, __u64 ticks_per_sec)
 	return 0;
 }
 
+static void decode_we_status(int ret) {
+	if (ret & MEMCPY_WE_STAT_TRANS_FAULT)
+		fprintf(stderr, "Error: Translation Fault \"Continue\"\n");
+	if (ret & MEMCPY_WE_STAT_AERROR)
+		fprintf(stderr, "Error: Aerror\n");
+	if (ret & MEMCPY_WE_STAT_DERROR)
+		fprintf(stderr, "Error: Derror\n");
+	if (ret & MEMCPY_WE_STAT_PSL_FAULT)
+		fprintf(stderr, "Error: PSL Fault response\n");
+	if (ret & MEMCPY_WE_STAT_INV_SRC)
+		fprintf(stderr, "Error: Invalid interrupt source number\n");
+	if (ret & MEMCPY_WE_STAT_PROC_TERM)
+		fprintf(stderr, "Error: Process terminated\\n");
+	if (ret & MEMCPY_WE_STAT_UNDEF_CMD)
+		fprintf(stderr, "Error: Undefined Cmd or CAS_INV response\n");
+}
+
 int test_afu_memcpy(char *src, char *dst, size_t size, int count,
 		    struct memcpy_test_args *args)
 {
@@ -211,6 +253,7 @@ int test_afu_memcpy(char *src, char *dst, size_t size, int count,
 	int afu_fd, i, ret = 0, t;
 	struct memcpy_weq weq;
 	struct memcpy_work_element memcpy_we, irq_we, *queued_we;
+	struct memcpy_work_element increment_we;
 	struct cxl_event event;
 	struct timeval timeout;
 	struct timeval start, end, temp;
@@ -222,22 +265,34 @@ int test_afu_memcpy(char *src, char *dst, size_t size, int count,
 		fprintf(stderr, "Out of memory\n");
 		return 1;
 	}
-	afu_h = cxl_afu_open_dev(cxldev);
-	if (afu_h == NULL) {
-		fprintf(stderr, "Unable to open cxl device %s: %d\n",
-			cxldev, errno);
-		ret = 1;
-		goto err1;
-	}
-	afu_fd = cxl_afu_fd(afu_h);
 
+	do {
+		afu_h = cxl_afu_open_dev(cxldev);
+		if (afu_h == NULL) {
+			fprintf(stderr, "Unable to open cxl device %s: %d\n",
+				cxldev, errno);
+			ret = 1;
+			goto err1;
+		}
+		process_handle_ioctl = cxl_afu_get_process_element(afu_h);
+	} while (skip_process_element(args, process_handle_ioctl));
+
+	afu_fd = cxl_afu_fd(afu_h);
 	memcpy_init_weq(&weq, QUEUE_SIZE);
 
 	/* Point the work element descriptor (wed) at the weq */
 	wed = MEMCPY_WED(weq.queue, QUEUE_SIZE/CACHELINESIZE);
-	printf("# WED = 0x%llx for PID = %d\n", (unsigned long long)wed, pid);
+	printf("# WED = 0x%llx for PID = %d via PE = %d\n",
+               (unsigned long long)wed, pid, process_handle_ioctl);
 
-	/* Setup a work element in the queue */
+	/* Setup the increment work element */
+	increment_we.cmd = MEMCPY_WE_CMD(0, MEMCPY_WE_CMD_INCR);
+	increment_we.status = 0;
+	increment_we.length = htobe16((uint16_t)sizeof(pid_t));
+	increment_we.src = htobe64((uintptr_t)src);
+	increment_we.dst = htobe64((uintptr_t)dst);
+
+	/* Setup the memcpy work element */
 	memcpy_we.cmd = MEMCPY_WE_CMD(0, MEMCPY_WE_CMD_COPY);
 	memcpy_we.status = 0;
 	memcpy_we.length = htobe16((uint16_t)size);
@@ -273,7 +328,6 @@ int test_afu_memcpy(char *src, char *dst, size_t size, int count,
 		ret = 1;
 		goto err2;
 	}
-	process_handle_ioctl = cxl_afu_get_process_element(afu_h);
 	if (process_handle_ioctl < 0) {
 		perror("process_handle_ioctl");
 		ret = 1;
@@ -303,17 +357,24 @@ int test_afu_memcpy(char *src, char *dst, size_t size, int count,
 	assert(process_handle_memcpy == process_handle_ioctl);
 
 	/* Initialise source buffer with unique(ish) per-process value */
-	for (i = 0; i < size; i++)
-		*(src + i) = pid & 0xff;
+	if (args->increment_flag) {
+		*(pid_t *)src = htobe32(pid - 1);
+	} else {
+		for (i = 0; i < size; i++)
+			*(src + i) = pid & 0xff;
+	}
 
 	FD_ZERO(&set);
 	FD_SET(afu_fd, &set);
-
 	gettimeofday(&start, NULL);
 
 	for (i = 0; i < count; i++) {
 		ret = 0;
-		queued_we = memcpy_add_we(&weq, memcpy_we);
+		if (args->increment_flag){
+			*(pid_t *)src = htobe32(be32toh(*(pid_t *)src) + 1);
+			queued_we = memcpy_add_we(&weq, increment_we);
+		} else
+			queued_we = memcpy_add_we(&weq, memcpy_we);
 		if (args->irq)
 			memcpy_add_we(&weq, irq_we);
 		queued_we->cmd |= MEMCPY_WE_CMD_VALID;
@@ -363,11 +424,19 @@ int test_afu_memcpy(char *src, char *dst, size_t size, int count,
 			}
 
 			if (queued_we->status) {
+				if (ret != MEMCPY_WE_STAT_COMPLETE)
+					decode_we_status(ret);
 				break;
 			}
 		}
-
-		ret |= memcmp(dst, src, size) == 0 ? 0 : ERR_MEMCMP;
+		if (args->increment_flag) {
+			printf("src=%u dst=%u\n", be32toh(*(pid_t *)src),
+			        be32toh(*(pid_t *)dst));
+			ret |= be32toh(*(pid_t *)dst)
+			     - be32toh(*(pid_t *)src) == 1 ? 0 : ERR_INCR;
+		} else {
+			ret |= memcmp(dst, src, size) == 0 ? 0 : ERR_MEMCMP;
+		}
 		if (ret) {
 			printf("# Error on loop %d\n", i);
 			break;
@@ -386,6 +455,38 @@ err1:
 	return ret;
 }
 
+static int get_caia_major(struct memcpy_test_args *args)
+{
+	struct cxl_adapter_h *adapter;
+	char *name;
+	long caia_minor;
+	int card_num;
+
+	/* get caia version of adapter */
+	cxl_for_each_adapter(adapter) {
+		name = cxl_adapter_dev_name(adapter);
+		sscanf(name, "card%d", &card_num);
+		if (card_num == args->card) {
+			if (cxl_get_caia_version(adapter, &args->caia_major,
+						 &caia_minor)) {
+				perror("cxl_get_caia_version");
+				return 1;
+			}
+			break;
+		}
+	}
+	if (errno) {
+		perror("cxl_for_each_adapter");
+		return 1;
+	}
+	if (card_num != args->card) {
+		fprintf(stderr, "/sys/class/cxl/card%d: no such cxl card\n",
+			args->card);
+		return 1;
+	}
+	return 0;
+}
+
 int run_tests(void *argp)
 {
 	struct memcpy_test_args *args = argp;
@@ -396,23 +497,30 @@ int run_tests(void *argp)
 	char *src, *dst;
 	pid_t pid;
 
-	set_afu_master_psa_registers(args);
+	if (get_caia_major(args))
+		return 1;
+
+	if (set_afu_master_psa_registers(args))
+		return 1;
 
 	/* Allocate memory areas for afu to copy to/from */
-	src = aligned_alloc(CACHELINESIZE/2, buflen);
-	dst = aligned_alloc(CACHELINESIZE/2, buflen);
+	if (args->caia_major == 2 && buflen > 128)
+		buflen = 128;	/* MemCpy AFU v2 restriction */
+	src = aligned_alloc(CACHELINESIZE, buflen);
+	dst = aligned_alloc(CACHELINESIZE, buflen);
 
-	printf("# Starting %d processes doing %d memcpy loops\n", processes, loops);
+	printf("# Starting %d processes doing %d %s loops\n", processes, loops,
+	       args->increment_flag ? "increment" : "memcpy");
 	printf("# Queue size: %dkB, Queue length: %d\n", QUEUE_SIZE/1024,
 	       memcpy_queue_length(QUEUE_SIZE));
 	printf("# src: %p dst: %p\n", src, dst);
-	for(i = 0; i < processes; i++) {
+	for (i = 0; i < processes; i++) {
 		if (!fork())
 			/* Child process */
 			exit(test_afu_memcpy(src, dst, buflen, loops, args));
 	}
 
-	for(i = 0; i < processes; i++) {
+	for (i = 0; i < processes; i++) {
 		pid = wait(&j);
 		if (pid && j) {
 			printf("# Error copying for PID = %d\n", pid);
@@ -427,7 +535,10 @@ static void usage()
 {
 	fprintf(stderr, "Usage: memcpy_afu_ctx [options]\n");
 	fprintf(stderr, "Options:\n");
+	fprintf(stderr, "\t-a\t\tAdd 1. Do not memcpy. Test increment instead.\n");
 	fprintf(stderr, "\t-c <card_num>\tUse this CAPI card (default 0).\n");
+	fprintf(stderr, "\t-e <timeout>\tEnd timeout.\n"
+			"\t\t\tSeconds to wait for the AFU to signal completion.\n");
 	fprintf(stderr, "\t-h\t\tDisplay this help text.\n");
 	fprintf(stderr,
 	        "\t-I <irq_count>\tDefine this number of interrupts (default 4).\n");
@@ -440,11 +551,9 @@ static void usage()
 	fprintf(stderr,
 	        "\t-p <procs>\tFork this number of processes (default 1).\n");
 	fprintf(stderr,
-	        "\t-s <bufsize>\tCopy this number of bytes (default 1024).\n");
-	fprintf(stderr, "\t-t\t\tDo not memcpy. Test timebase sync instead.\n");
-	fprintf(stderr,
-	        "\t-e <timeout>\t\tEnd timeout.\n"
-			"\t\t\tSeconds to wait for the AFU to signal completion.\n");
+		"\t-s <bufsize>\tCopy this number of bytes (default 1024).\n"
+		"\t\t\tBuffer size limited to 128 for MemCpy 2.0 AFU for PSL9.\n");
+	fprintf(stderr, "\t-t\t\tTimebase. Do not memcpy. Test timebase sync instead.\n");
 	exit(2);
 }
 
@@ -460,18 +569,23 @@ int main(int argc, char *argv[])
 		.irq_count = -1,
 		.stop_flag = 0,
 		.timebase_flag = 0,
+		.increment_flag = 0,
 		.card = 0,
 		.completion_timeout = COMPLETION_TIMEOUT,
+		.caia_major = 0,
 	};
 
 	while (1) {
-		c = getopt(argc, argv, "+hktp:l:s:i:I:c:e:");
+		c = getopt(argc, argv, "+ahktp:l:s:i:I:c:e:");
 		if (c < 0)
 			break;
 		switch (c) {
 		case '?':
 		case 'h':
 			usage();
+			break;
+		case 'a':
+			args.increment_flag = 1;
 			break;
 		case 'k':
 			/* This arg is to change the behavior of MCP.
