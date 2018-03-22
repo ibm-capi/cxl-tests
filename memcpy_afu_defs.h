@@ -21,12 +21,14 @@
 
 /* Hardware definitions for the memcpy AFU.  All big endian */
 struct memcpy_work_element {
-	volatile __u8 cmd; /* valid, wrap, cmd */
+	volatile __u8 cmd;	/* valid, wrap, cmd */
 	volatile __u8 status;
-	__be16 length; /* also irq src */
-	__be32 reserved1;
-	__be64 reserved2;
-	__be64 src;
+	__be16 length;		/* also irq src */
+	__u8 cmd_extra;
+	__u8 reserved1;
+	__u16 reserved2;
+	__be64 atomic_op1;
+	__be64 src;		/* also atomic_op2 */
 	__be64 dst;
 };
 
@@ -36,6 +38,7 @@ struct memcpy_work_element {
 #define MEMCPY_WE_CMD_COPY	0
 #define MEMCPY_WE_CMD_IRQ	1
 #define MEMCPY_WE_CMD_INCR	4
+#define MEMCPY_WE_CMD_ATOMIC	5
 #define MEMCPY_WE_STAT_COMPLETE		0x80
 #define MEMCPY_WE_STAT_TRANS_FAULT	0x40
 #define MEMCPY_WE_STAT_AERROR		0x20
@@ -58,6 +61,10 @@ struct memcpy_work_element {
 #define MEMCPY_AFU_PSA_REG_ERR		2
 #define MEMCPY_AFU_PSA_REG_ERR_INFO	3
 #define MEMCPY_AFU_PSA_REG_TRACE_CTL	4
+
+/* AFU atomic commands */
+# define MEMCPY_WE_CMD_EXTRA_CAS_NOT_EQUAL_8	0x10
+# define MEMCPY_WE_CMD_EXTRA_CAS_EQUAL_8	0x11
 
 /* AFU Configuration Register bits */
 #define MEMCPY_AFU_PSA_REG_CFG_Stop_on_Inv_Cmd	0x2000000000000000ULL

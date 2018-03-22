@@ -46,6 +46,7 @@
 #define ERR_EVENTFAIL	0x2
 #define ERR_MEMCMP	0x4
 #define ERR_INCR	0x8
+#define ERR_ATOMIC_CAS	0x9
 
 /* Default amount of time to wait (in seconds) for a test to complete */
 #define KILL_TIMEOUT	5
@@ -69,6 +70,7 @@ struct memcpy_test_args {
 	int stop_flag;
 	int timebase_flag;
 	int increment_flag;
+	int atomic_cas_flag;
 	int card;
 	int completion_timeout;
 	long int caia_major;
@@ -253,7 +255,7 @@ int test_afu_memcpy(char *src, char *dst, size_t size, int count,
 	int afu_fd, i, ret = 0, t;
 	struct memcpy_weq weq;
 	struct memcpy_work_element memcpy_we, irq_we, *queued_we;
-	struct memcpy_work_element increment_we;
+	struct memcpy_work_element increment_we, atomic_cas_we;
 	struct cxl_event event;
 	struct timeval timeout;
 	struct timeval start, end, temp;
@@ -284,6 +286,15 @@ int test_afu_memcpy(char *src, char *dst, size_t size, int count,
 	wed = MEMCPY_WED(weq.queue, QUEUE_SIZE/CACHELINESIZE);
 	printf("# WED = 0x%llx for PID = %d via PE = %d\n",
                (unsigned long long)wed, pid, process_handle_ioctl);
+
+	/* Setup the atomic compare and swap work element */
+	atomic_cas_we.cmd = MEMCPY_WE_CMD(0, MEMCPY_WE_CMD_ATOMIC);
+	atomic_cas_we.status = 0;
+	atomic_cas_we.length = htobe16((uint16_t)1);
+	atomic_cas_we.cmd_extra = MEMCPY_WE_CMD_EXTRA_CAS_EQUAL_8;
+	atomic_cas_we.atomic_op1 = htobe64((uintptr_t)0);
+	atomic_cas_we.src = htobe64((uintptr_t)1);     /* atomic_op2 */
+	atomic_cas_we.dst = htobe64((uintptr_t)dst);
 
 	/* Setup the increment work element */
 	increment_we.cmd = MEMCPY_WE_CMD(0, MEMCPY_WE_CMD_INCR);
@@ -357,7 +368,9 @@ int test_afu_memcpy(char *src, char *dst, size_t size, int count,
 	assert(process_handle_memcpy == process_handle_ioctl);
 
 	/* Initialise source buffer with unique(ish) per-process value */
-	if (args->increment_flag) {
+	if (args->atomic_cas_flag) {
+		memset(dst, 0, size);
+	} else if (args->increment_flag) {
 		*(pid_t *)src = htobe32(pid - 1);
 	} else {
 		for (i = 0; i < size; i++)
@@ -370,7 +383,9 @@ int test_afu_memcpy(char *src, char *dst, size_t size, int count,
 
 	for (i = 0; i < count; i++) {
 		ret = 0;
-		if (args->increment_flag){
+		if (args->atomic_cas_flag) {
+			queued_we = memcpy_add_we(&weq, atomic_cas_we);
+		} else if (args->increment_flag) {
 			*(pid_t *)src = htobe32(be32toh(*(pid_t *)src) + 1);
 			queued_we = memcpy_add_we(&weq, increment_we);
 		} else
@@ -429,7 +444,9 @@ int test_afu_memcpy(char *src, char *dst, size_t size, int count,
 				break;
 			}
 		}
-		if (args->increment_flag) {
+		if (args->atomic_cas_flag) {
+			ret |= be64toh((uintptr_t)dst) ? 0 : ERR_ATOMIC_CAS;
+		} else if (args->increment_flag) {
 			printf("src=%u dst=%u\n", be32toh(*(pid_t *)src),
 			        be32toh(*(pid_t *)dst));
 			ret |= be32toh(*(pid_t *)dst)
@@ -510,6 +527,7 @@ int run_tests(void *argp)
 	dst = aligned_alloc(CACHELINESIZE, buflen);
 
 	printf("# Starting %d processes doing %d %s loops\n", processes, loops,
+	       args->atomic_cas_flag ? "atomic compare and swap" :
 	       args->increment_flag ? "increment" : "memcpy");
 	printf("# Queue size: %dkB, Queue length: %d\n", QUEUE_SIZE/1024,
 	       memcpy_queue_length(QUEUE_SIZE));
@@ -535,7 +553,8 @@ static void usage()
 {
 	fprintf(stderr, "Usage: memcpy_afu_ctx [options]\n");
 	fprintf(stderr, "Options:\n");
-	fprintf(stderr, "\t-a\t\tAdd 1. Do not memcpy. Test increment instead.\n");
+	fprintf(stderr, "\t-A\t\tAtomic. Test atomic compare and swap.\n");
+	fprintf(stderr, "\t-a\t\tAdd 1. Test increment.\n");
 	fprintf(stderr, "\t-c <card_num>\tUse this CAPI card (default 0).\n");
 	fprintf(stderr, "\t-e <timeout>\tEnd timeout.\n"
 			"\t\t\tSeconds to wait for the AFU to signal completion.\n");
@@ -553,7 +572,7 @@ static void usage()
 	fprintf(stderr,
 		"\t-s <bufsize>\tCopy this number of bytes (default 1024).\n"
 		"\t\t\tBuffer size limited to 128 for MemCpy 2.0 AFU for PSL9.\n");
-	fprintf(stderr, "\t-t\t\tTimebase. Do not memcpy. Test timebase sync instead.\n");
+	fprintf(stderr, "\t-t\t\tTimebase. Test timebase sync.\n");
 	exit(2);
 }
 
@@ -570,19 +589,23 @@ int main(int argc, char *argv[])
 		.stop_flag = 0,
 		.timebase_flag = 0,
 		.increment_flag = 0,
+		.atomic_cas_flag = 0,
 		.card = 0,
 		.completion_timeout = COMPLETION_TIMEOUT,
 		.caia_major = 0,
 	};
 
 	while (1) {
-		c = getopt(argc, argv, "+ahktp:l:s:i:I:c:e:");
+		c = getopt(argc, argv, "+Aahktp:l:s:i:I:c:e:");
 		if (c < 0)
 			break;
 		switch (c) {
 		case '?':
 		case 'h':
 			usage();
+			break;
+		case 'A':
+			args.atomic_cas_flag = 1;
 			break;
 		case 'a':
 			args.increment_flag = 1;
