@@ -23,7 +23,7 @@ CFLAGS += -I $(libcxl_dir) -I $(libcxl_dir)/include
 LDFLAGS += -L $(libcxl_dir) -lcxl -lpthread
 
 # Add tests here
-tests = memcpy_afu_ctx.c libcxl_tests.c
+tests = memcpy_afu_ctx.c libcxl_tests.c cxl-threads.c
 
 # Add any .o files tests may depend on
 test_deps = memcpy_afu.o
