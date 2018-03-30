@@ -35,7 +35,7 @@ linked:
 
     $ export CROSS_COMPILE=powerpc64le-linux-gnu-
     $ export CFLAGS=-static
-	$ make
+        $ make
 
 Usage
 -----
@@ -45,6 +45,8 @@ Usage
     $ ./memcpy_afu_ctx      # Test memcpy AFU memory copy
     $ ./memcpy_afu_ctx -t   # Test memcpy AFU timebase sync
     $ ./cxl_eeh_tests.sh    # Test device reset and recovery
+    $ ./cxl-threads         # Test memcpy with one thread attaching
+                            # and exiting, and other threads copying
 
     Usage: memcpy_afu_ctx [options]
     Options:
@@ -63,6 +65,18 @@ Usage
     Usage: cxl_eeh_tests.sh [options]
     Options:
         -c <card_num>   Use this CAPI card (default 0).
+
+    Usage:./cxl-threads [options]
+        -n <num>        Number of threads that execute memcpy.
+        -t              Do the work element setup on the main thread.
+        -c <index>      Card index to runs tests on.
+        -z              Exit the main thread after spawing the child threads
+                        (zombie-state)
+        -j              Join the spawned thread to exit (default)
+        -d              Detach from the child threads and die (dead-state)
+        -m              Use malloced memory instead of static memory
+                        for src/dst buffer
+        -s <size>       Size of the copy buffer used.
 
 Contributing
 ------------
