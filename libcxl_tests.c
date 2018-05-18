@@ -97,6 +97,11 @@ void pr_adapter_attr(struct cxl_adapter_h *adapter)
 		perror("cxl_get_psl_timebase_synced");
 	else
 		printf("    %s.psl_timebase_synced=%ld\n", name, major);
+	/* POWER9 specific attribute */
+	if (cxl_get_tunneled_ops_supported(adapter, &major))
+		perror("cxl_get_tunneled_ops_supported");
+	else
+		printf("    %s.tunneled_ops_supported=%ld\n", name, major);
 }
 
 void pr_afu_attr(struct cxl_afu_h *afu, int dedicated)
