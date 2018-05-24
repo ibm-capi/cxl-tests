@@ -157,8 +157,8 @@ void *afu_slave_threadproc_dynamic(void *arg)
 	for (index = 0; index < loops; ++index) {
 		int ret;
 
-		srcbuffer = aligned_alloc(64, szbuffer);
-		dstbuffer = aligned_alloc(64, szbuffer);
+		srcbuffer = aligned_alloc(128, szbuffer);
+		dstbuffer = aligned_alloc(128, szbuffer);
 
 		if ((srcbuffer == NULL) || (dstbuffer == NULL)) {
 		  printf("THREAD[%d]: Copy Loop index %d .. "
