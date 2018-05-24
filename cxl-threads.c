@@ -64,7 +64,7 @@
 /* default Master context to be used */
 #define MEMCPY_MASTER_CONTEXT "/dev/cxl/afu0.0m"
 
-#define MAX_BUFFER_SIZE  2048
+#define MAX_BUFFER_SIZE  1024
 
 /* holds the path to  slave context to be used */
 char arg_master_context[PATH_MAX] = MEMCPY_MASTER_CONTEXT;
@@ -223,9 +223,10 @@ void *afu_slave_threadproc_static(void *arg)
 {
 	int thindex, index;
 	uintptr_t rc = 0;
-	char srcbuffer[MAX_BUFFER_SIZE], dstbuffer[MAX_BUFFER_SIZE];
 	int fd_random;
 	int loops = (uintptr_t)arg;
+	char srcbuffer[MAX_BUFFER_SIZE] __attribute__((aligned (128)));
+	char dstbuffer[MAX_BUFFER_SIZE] __attribute__((aligned (128)));
 
 	/* get the task_struct pid */
 	thindex = syscall(SYS_gettid);
