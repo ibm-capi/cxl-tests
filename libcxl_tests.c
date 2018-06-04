@@ -220,9 +220,19 @@ void pr_afu_attr(struct cxl_afu_h *afu, int dedicated)
 	case CXL_PREFAULT_MODE_NONE:
 		printf("    %s.prefault_mode=none\n", name); break;
 	case CXL_PREFAULT_MODE_WED:
-		printf("    %s.prefault_mode=wed\n", name); break;
+		printf("    %s.prefault_mode=wed\n", name);
+		if (isRadix) {
+			fprintf(stderr, "!!Error not supported on Radix\n");
+			exit(1);
+		}
+		break;
 	case CXL_PREFAULT_MODE_ALL:
-		printf("    %s.prefault_mode=all\n", name); break;
+		printf("    %s.prefault_mode=all\n", name);
+		if (isRadix) {
+			fprintf(stderr, "!!Error not supported on Radix\n");
+			exit(1);
+		}
+		break;
 	}
 }
 
@@ -337,13 +347,24 @@ void pr_afu_slave_attr(struct cxl_afu_h *afu)
 		perror("cxl_get_prefault_mode");
 		exit(1);
 	}
+
 	switch (prefault_mode) {
 	case CXL_PREFAULT_MODE_NONE:
 		printf("    %s.prefault_mode=none\n", name); break;
 	case CXL_PREFAULT_MODE_WED:
-		printf("    %s.prefault_mode=wed\n", name); break;
+		printf("    %s.prefault_mode=wed\n", name);
+		if (isRadix) {
+			fprintf(stderr, "!!Error not supported on Radix\n");
+			exit(1);
+		}
+		break;
 	case CXL_PREFAULT_MODE_ALL:
-		printf("    %s.prefault_mode=all\n", name); break;
+		printf("    %s.prefault_mode=all\n", name);
+		if (isRadix) {
+			fprintf(stderr, "!!Error not supported on Radix\n");
+			exit(1);
+		}
+		break;
 	}
 	if (cxl_get_api_version(afu, &major)) {
 		perror("cxl_get_api_version");
@@ -473,10 +494,24 @@ void wr_afu_attr(struct cxl_afu_h *afu, int attached)
 		perror("cxl_get_prefault_mode");
 		exit(1);
 	}
-	/* Valid prefault_mode values. */
+
 	set_prefault_mode(afu, CXL_PREFAULT_MODE_NONE);
-	set_prefault_mode(afu, CXL_PREFAULT_MODE_WED);
-	set_prefault_mode(afu, CXL_PREFAULT_MODE_ALL);
+	/* Valid prefault_mode values. */
+
+	if (isRadix) {
+		/* On Radix only 'CXL_PREFAULT_MODE_NONE' is supported */
+		if (cxl_set_prefault_mode(afu, CXL_PREFAULT_MODE_WED) != -1 ||
+		    cxl_set_prefault_mode(afu, CXL_PREFAULT_MODE_ALL) != -1) {
+			printf("Error: cxl_set_prefault_mode(1) should "
+			       "fail with EINVAL on Radix\n");
+			exit(1);
+		}
+
+	} else {
+		set_prefault_mode(afu, CXL_PREFAULT_MODE_WED);
+		set_prefault_mode(afu, CXL_PREFAULT_MODE_ALL);
+	}
+
 	set_prefault_mode(afu, prefault_mode);
 	/* Invalid prefault_mode values. */
 	if (!(cxl_set_prefault_mode(afu, -1) == -1 && errno == EINVAL)) {
