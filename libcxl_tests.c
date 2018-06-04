@@ -32,6 +32,37 @@
 /* Queue sizes other than 512kB don't seem to work */
 #define QUEUE_SIZE      4095*CACHELINESIZE
 
+static int isRadix;
+
+static int set_isRadix(void)
+{
+	const char line[] = "MMU\t\t: Radix\n";
+	char buffer[1024]; /* Assuming max line length of 1024 chars */
+	FILE *fp;
+	int ret = 0;
+
+	fp = fopen("/proc/cpuinfo", "rt");
+
+	if (fp == NULL) {
+		perror("Unable to open /proc/cpuinfo");
+		return -1;
+	}
+
+	while (fgets(buffer, sizeof(buffer), fp) != NULL) {
+		if (strncmp(line, buffer, sizeof(buffer)) == 0) {
+			isRadix = 1;
+			break;
+		}
+	}
+
+	if (ferror(fp)) {
+		perror("Unable to read contents of /proc/cpuinfo");
+		ret = -1;
+	}
+	fclose(fp);
+	return ret;
+}
+
 int attach_afu(struct cxl_afu_h *afu)
 {
 	int ret = 0;
@@ -469,6 +500,10 @@ int main(int argc, char *argv[])
 	int afu_fd;
 	char *name;
 	long mode;
+
+	/* Check if we are running in radix mode */
+	if (set_isRadix())
+		exit(1);
 
 	printf("Enumerating CXL cards and AFUs...\n");
 	cxl_for_each_adapter(adapter_h) {
