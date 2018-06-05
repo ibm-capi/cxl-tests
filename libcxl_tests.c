@@ -32,6 +32,37 @@
 /* Queue sizes other than 512kB don't seem to work */
 #define QUEUE_SIZE      4095*CACHELINESIZE
 
+static int isRadix;
+
+static int set_isRadix(void)
+{
+	const char line[] = "MMU\t\t: Radix\n";
+	char buffer[1024]; /* Assuming max line length of 1024 chars */
+	FILE *fp;
+	int ret = 0;
+
+	fp = fopen("/proc/cpuinfo", "rt");
+
+	if (fp == NULL) {
+		perror("Unable to open /proc/cpuinfo");
+		return -1;
+	}
+
+	while (fgets(buffer, sizeof(buffer), fp) != NULL) {
+		if (strncmp(line, buffer, sizeof(buffer)) == 0) {
+			isRadix = 1;
+			break;
+		}
+	}
+
+	if (ferror(fp)) {
+		perror("Unable to read contents of /proc/cpuinfo");
+		ret = -1;
+	}
+	fclose(fp);
+	return ret;
+}
+
 int attach_afu(struct cxl_afu_h *afu)
 {
 	int ret = 0;
@@ -189,9 +220,19 @@ void pr_afu_attr(struct cxl_afu_h *afu, int dedicated)
 	case CXL_PREFAULT_MODE_NONE:
 		printf("    %s.prefault_mode=none\n", name); break;
 	case CXL_PREFAULT_MODE_WED:
-		printf("    %s.prefault_mode=wed\n", name); break;
+		printf("    %s.prefault_mode=wed\n", name);
+		if (isRadix) {
+			fprintf(stderr, "!!Error not supported on Radix\n");
+			exit(1);
+		}
+		break;
 	case CXL_PREFAULT_MODE_ALL:
-		printf("    %s.prefault_mode=all\n", name); break;
+		printf("    %s.prefault_mode=all\n", name);
+		if (isRadix) {
+			fprintf(stderr, "!!Error not supported on Radix\n");
+			exit(1);
+		}
+		break;
 	}
 }
 
@@ -306,13 +347,24 @@ void pr_afu_slave_attr(struct cxl_afu_h *afu)
 		perror("cxl_get_prefault_mode");
 		exit(1);
 	}
+
 	switch (prefault_mode) {
 	case CXL_PREFAULT_MODE_NONE:
 		printf("    %s.prefault_mode=none\n", name); break;
 	case CXL_PREFAULT_MODE_WED:
-		printf("    %s.prefault_mode=wed\n", name); break;
+		printf("    %s.prefault_mode=wed\n", name);
+		if (isRadix) {
+			fprintf(stderr, "!!Error not supported on Radix\n");
+			exit(1);
+		}
+		break;
 	case CXL_PREFAULT_MODE_ALL:
-		printf("    %s.prefault_mode=all\n", name); break;
+		printf("    %s.prefault_mode=all\n", name);
+		if (isRadix) {
+			fprintf(stderr, "!!Error not supported on Radix\n");
+			exit(1);
+		}
+		break;
 	}
 	if (cxl_get_api_version(afu, &major)) {
 		perror("cxl_get_api_version");
@@ -442,10 +494,24 @@ void wr_afu_attr(struct cxl_afu_h *afu, int attached)
 		perror("cxl_get_prefault_mode");
 		exit(1);
 	}
-	/* Valid prefault_mode values. */
+
 	set_prefault_mode(afu, CXL_PREFAULT_MODE_NONE);
-	set_prefault_mode(afu, CXL_PREFAULT_MODE_WED);
-	set_prefault_mode(afu, CXL_PREFAULT_MODE_ALL);
+	/* Valid prefault_mode values. */
+
+	if (isRadix) {
+		/* On Radix only 'CXL_PREFAULT_MODE_NONE' is supported */
+		if (cxl_set_prefault_mode(afu, CXL_PREFAULT_MODE_WED) != -1 ||
+		    cxl_set_prefault_mode(afu, CXL_PREFAULT_MODE_ALL) != -1) {
+			printf("Error: cxl_set_prefault_mode(1) should "
+			       "fail with EINVAL on Radix\n");
+			exit(1);
+		}
+
+	} else {
+		set_prefault_mode(afu, CXL_PREFAULT_MODE_WED);
+		set_prefault_mode(afu, CXL_PREFAULT_MODE_ALL);
+	}
+
 	set_prefault_mode(afu, prefault_mode);
 	/* Invalid prefault_mode values. */
 	if (!(cxl_set_prefault_mode(afu, -1) == -1 && errno == EINVAL)) {
@@ -469,6 +535,10 @@ int main(int argc, char *argv[])
 	int afu_fd;
 	char *name;
 	long mode;
+
+	/* Check if we are running in radix mode */
+	if (set_isRadix())
+		exit(1);
 
 	printf("Enumerating CXL cards and AFUs...\n");
 	cxl_for_each_adapter(adapter_h) {
