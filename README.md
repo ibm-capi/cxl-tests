@@ -35,7 +35,7 @@ linked:
 
     $ export CROSS_COMPILE=powerpc64le-linux-gnu-
     $ export CFLAGS=-static
-        $ make
+    $ make
 
 Usage
 -----
@@ -77,6 +77,21 @@ Usage
         -m              Use malloced memory instead of static memory
                         for src/dst buffer
         -s <size>       Size of the copy buffer used.
+
+
+Kernel Test
+-----------
+
+The CXL kernel API can be tested through the cxl-memcpy.ko driver. It is not
+part of the automated script.
+
+To build the kernel module:
+    $ [KERNELDIR=<linux build tree>] make cxl-memcpy.ko
+
+To test (root only):
+    $ insmod ./cxl-memcpy.ko
+    $ ./memcpy_afu_ctx -K [-p <proc count>] [-l <loop count>]
+
 
 Contributing
 ------------

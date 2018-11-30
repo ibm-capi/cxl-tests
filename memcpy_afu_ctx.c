@@ -71,6 +71,7 @@ struct memcpy_test_args {
 	int timebase_flag;
 	int increment_flag;
 	int atomic_cas_flag;
+	int kernel_flag;
 	int card;
 	int completion_timeout;
 	long int caia_major;
@@ -241,6 +242,65 @@ static void decode_we_status(int ret) {
 		fprintf(stderr, "Error: Process terminated\\n");
 	if (ret & MEMCPY_WE_STAT_UNDEF_CMD)
 		fprintf(stderr, "Error: Undefined Cmd or CAS_INV response\n");
+}
+
+int test_afu_memcpy_kernel(char *src, char *dst, size_t size, int count,
+		    struct memcpy_test_args *args)
+{
+	pid_t pid;
+	int fd, i, n, ret = 0, t;
+	struct timeval start, end;
+
+	pid = getpid();
+        fd = open("/dev/cxlmemcpy", O_RDWR | O_CLOEXEC);
+        if (fd < 0) {
+                perror("Unable to open /dev/cxlmemcpy device");
+                return 1;
+        }
+
+	/* Initialise source buffer with unique(ish) per-process value */
+	for (i = 0; i < size; i++)
+		*(src + i) = pid & 0xff;
+
+	gettimeofday(&start, NULL);
+
+	for (i = 0; i < count; i++) {
+		if (lseek(fd, 0, SEEK_SET)) {
+			perror("lseek");
+			ret = 1;
+			goto err;
+		}
+		n = write(fd, src, size);
+		if (n != size) {
+			perror("can't write buffer");
+			ret = 1;
+			goto err;
+		}
+		if (lseek(fd, 0, SEEK_SET)) {
+			perror("lseek");
+			ret = 1;
+			goto err;
+		}
+		n = read(fd, dst, size);
+		if (n != size) {
+			perror("can't read buffer");
+			ret = 1;
+			goto err;
+		}
+		ret |= memcmp(dst, src, size) == 0 ? 0 : ERR_MEMCMP;
+		if (ret) {
+			printf("Error on loop %d\n", i);
+			break;
+		}
+		memset(dst, 0, size);
+	}
+
+	gettimeofday(&end, NULL);
+	t = (end.tv_sec - start.tv_sec)*1000000 + end.tv_usec - start.tv_usec;
+	printf("%d loops in %d uS (%0.2f uS per loop)\n", count, t, ((float) t)/count);
+err:
+	close(fd);
+	return ret;
 }
 
 int test_afu_memcpy(char *src, char *dst, size_t size, int count,
@@ -517,8 +577,10 @@ int run_tests(void *argp)
 	if (get_caia_major(args))
 		return 1;
 
-	if (set_afu_master_psa_registers(args))
-		return 1;
+	if (! args->kernel_flag) {
+		if (set_afu_master_psa_registers(args))
+			return 1;
+	}
 
 	/* Allocate memory areas for afu to copy to/from */
 	if (args->caia_major == 2 && buflen > 128)
@@ -532,10 +594,15 @@ int run_tests(void *argp)
 	printf("# Queue size: %dkB, Queue length: %d\n", QUEUE_SIZE/1024,
 	       memcpy_queue_length(QUEUE_SIZE));
 	printf("# src: %p dst: %p\n", src, dst);
+
 	for (i = 0; i < processes; i++) {
-		if (!fork())
+		if (!fork()) {
 			/* Child process */
+			if (args->kernel_flag)
+				exit(test_afu_memcpy_kernel(src, dst, buflen,
+				     loops, args));
 			exit(test_afu_memcpy(src, dst, buflen, loops, args));
+		}
 	}
 
 	for (i = 0; i < processes; i++) {
@@ -590,13 +657,14 @@ int main(int argc, char *argv[])
 		.timebase_flag = 0,
 		.increment_flag = 0,
 		.atomic_cas_flag = 0,
+		.kernel_flag = 0,
 		.card = 0,
 		.completion_timeout = COMPLETION_TIMEOUT,
 		.caia_major = 0,
 	};
 
 	while (1) {
-		c = getopt(argc, argv, "+Aahktp:l:s:i:I:c:e:");
+		c = getopt(argc, argv, "+AahKktp:l:s:i:I:c:e:");
 		if (c < 0)
 			break;
 		switch (c) {
@@ -609,6 +677,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'a':
 			args.increment_flag = 1;
+			break;
+		case 'K':
+			args.kernel_flag = 1;
 			break;
 		case 'k':
 			/* This arg is to change the behavior of MCP.
@@ -649,6 +720,14 @@ int main(int argc, char *argv[])
 		fprintf(stderr,
 			"Error: Unexpected argument '%s'\n", argv[optind]);
 		usage();
+	}
+	if (args.kernel_flag) {
+		if (args.irq || args.timebase_flag || args.stop_flag ||
+		    args.buflen != 1024 || args.irq_count != -1) {
+			fprintf(stderr,
+			"Flag -K is incompatible with -I -i -s -t\n");
+			exit(1);
+		}
 	}
 	get_name(&name, args.processes, args.loops);
 	printf("1..1\n");
