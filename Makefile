@@ -15,6 +15,7 @@
 #
 
 srcdir= $(PWD)
+ifeq ($(KERNELRELEASE),)
 include Makefile.vars
 
 libcxl_dir = libcxl
@@ -28,6 +29,9 @@ tests = memcpy_afu_ctx.c libcxl_tests.c cxl-threads.c
 # Add any .o files tests may depend on
 test_deps = memcpy_afu.o
 
+# kernel module
+kmodule = cxl-memcpy.ko
+
 tests: all
 all: $(tests:.c=)
 
@@ -36,6 +40,7 @@ libcxl_deps = $(foreach dep, $(libcxl_objs), $(libcxl_dir)/$(dep))
 
 -include $(tests:.c=.d)
 -include $(test_deps:.o=.d)
+-include $(kmodule:.ko=.d)
 include Makefile.rules
 
 $(libcxl_dir)/Makefile:
@@ -48,6 +53,13 @@ $(libcxl_deps): $(libcxl_dir)/Makefile
 
 $(test_deps):
 
+KERNELDIR ?= /lib/modules/$(shell uname -r)/build
+
+%.ko : %.c
+	$(call Q,CC, $(CC) -MM $(CFLAGS) $< > $*.d, $*.d)
+	$(call Q,SED, sed -i -e "s/$@.o/$@/" $*.d, $*.d)
+	$(MAKE) -C $(KERNELDIR) M=$(shell pwd) modules
+
 %.o : %.S
 	$(call Q,CC, $(CC) -MM $(CFLAGS) $< > $*.d, $*.d)
 	$(call Q,SED, sed -i -e "s/$@.o/$@/" $*.d, $*.d)
@@ -59,7 +71,14 @@ $(test_deps):
 	$(call Q,CC, $(CC) $(CFLAGS) $(filter %.c %.o,$^) $(LDFLAGS) -o $@, $@)
 
 clean:
-	/bin/rm -f $(tests:.c=) $(patsubst %.c,%.d,$(tests)) $(test_deps) $(patsubst %.o,%.d,$(test_deps))
+	/bin/rm -f $(tests:.c=) $(patsubst %.c,%.d,$(tests)) $(test_deps) \
+		$(patsubst %.o,%.d,$(test_deps)) $(kmodule:.ko=.d)
+	$(MAKE) -C $(KERNELDIR) M=$(shell pwd) clean
 	$(MAKE) -C $(libcxl_dir) clean
 
 .PHONY: clean all tests
+
+else
+ccflags-y += -I$(srcdir)/$(public_dir)
+obj-m := cxl-memcpy.o
+endif
