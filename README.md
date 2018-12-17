@@ -57,6 +57,7 @@ Usage
         -k              Use the Stop_on_Invalid_Command and Restart logic.
         -l <loops>      Run this number of memcpy loops (default 1).
         -p <procs>      Fork this number of processes (default 1).
+        -r              Reallocate destination buffer at each iteration.
         -s <bufsize>    Copy this number of bytes (default 1024).
         -t              Do not memcpy. Test timebase sync instead.
         -e <timeout>    End timeout.

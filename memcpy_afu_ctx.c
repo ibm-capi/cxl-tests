@@ -33,6 +33,7 @@
 #include <getopt.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <sys/mman.h>
 
 #include <libcxl.h>
 #include "memcpy_afu.h"
@@ -72,6 +73,7 @@ struct memcpy_test_args {
 	int increment_flag;
 	int atomic_cas_flag;
 	int kernel_flag;
+	int realloc_flag;
 	int card;
 	int completion_timeout;
 	long int caia_major;
@@ -518,7 +520,27 @@ int test_afu_memcpy(char *src, char *dst, size_t size, int count,
 			printf("# Error on loop %d\n", i);
 			break;
 		}
-		memset(dst, 0, size);
+		if (args->realloc_flag) {
+                        /*
+                         * unmap/remap the destination buffer to force a TLBI
+                         * and extra memory translation with each loop
+                         */
+			munmap(dst, getpagesize());
+			dst = mmap(NULL, getpagesize(),
+				   PROT_READ | PROT_WRITE,
+				   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+			if (dst == MAP_FAILED) {
+				fprintf(stderr,
+					"mmap failed for destination buffer\n");
+				goto err2;
+			}
+                        if (args->increment_flag)
+                                increment_we.dst = htobe64((uintptr_t)dst);
+                        else
+                                memcpy_we.dst = htobe64((uintptr_t)dst);
+                } else {
+			memset(dst, 0, size);
+		}
 	}
 
 	gettimeofday(&end, NULL);
@@ -586,8 +608,12 @@ int run_tests(void *argp)
 	if (args->caia_major == 2 && buflen > 128)
 		buflen = 128;	/* MemCpy AFU v2 restriction */
 	src = aligned_alloc(CACHELINESIZE, buflen);
-	dst = aligned_alloc(CACHELINESIZE, buflen);
-
+	dst = mmap(NULL, getpagesize(), PROT_READ | PROT_WRITE,
+		   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	if (dst == MAP_FAILED) {
+		fprintf(stderr, "mmap failed for destination buffer\n");
+		return 2;
+	}
 	printf("# Starting %d processes doing %d %s loops\n", processes, loops,
 	       args->atomic_cas_flag ? "atomic compare and swap" :
 	       args->increment_flag ? "increment" : "memcpy");
@@ -637,6 +663,8 @@ static void usage()
 	fprintf(stderr,
 	        "\t-p <procs>\tFork this number of processes (default 1).\n");
 	fprintf(stderr,
+	        "\t-r\t\tReallocate destination buffer at each iteration.\n");
+	fprintf(stderr,
 		"\t-s <bufsize>\tCopy this number of bytes (default 1024).\n"
 		"\t\t\tBuffer size limited to 128 for MemCpy 2.0 AFU for PSL9.\n");
 	fprintf(stderr, "\t-t\t\tTimebase. Test timebase sync.\n");
@@ -658,13 +686,14 @@ int main(int argc, char *argv[])
 		.increment_flag = 0,
 		.atomic_cas_flag = 0,
 		.kernel_flag = 0,
+		.realloc_flag = 0,
 		.card = 0,
 		.completion_timeout = COMPLETION_TIMEOUT,
 		.caia_major = 0,
 	};
 
 	while (1) {
-		c = getopt(argc, argv, "+AahKktp:l:s:i:I:c:e:");
+		c = getopt(argc, argv, "+AahKktp:l:rs:i:I:c:e:");
 		if (c < 0)
 			break;
 		switch (c) {
@@ -687,6 +716,10 @@ int main(int argc, char *argv[])
 			 * you need to "restart" the state machine to
 			 * tell it has work */
 			args.stop_flag = 1;
+			break;
+		case 'r':
+			/* Reallocate destination buffer at each iteration */
+			args.realloc_flag = 1;
 			break;
 		case 't':
 			/* Test timebase sync */
@@ -725,10 +758,14 @@ int main(int argc, char *argv[])
 		if (args.irq || args.timebase_flag || args.stop_flag ||
 		    args.buflen != 1024 || args.irq_count != -1) {
 			fprintf(stderr,
-			"Flag -K is incompatible with -I -i -s -t\n");
+			"Flag -K is incompatible with -I -i -r -s -t\n");
 			exit(1);
 		}
 	}
+	if (args.atomic_cas_flag && args.realloc_flag) {
+                fprintf(stderr, "Error: -A and -r are mutually exclusive\n");
+                exit(1);
+        }
 	get_name(&name, args.processes, args.loops);
 	printf("1..1\n");
 	printf("# test: %s\n", name);
