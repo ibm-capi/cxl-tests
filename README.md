@@ -54,8 +54,10 @@ Usage
         -h              Display this help text.
         -I <irq_count>  Define this number of interrupts (default 4).
         -i <irq_num>    Use this interrupt command source number (default 0).
+        -K              Test CXL kernel API (with module cxl-memcpy.ko).
         -k              Use the Stop_on_Invalid_Command and Restart logic.
         -l <loops>      Run this number of memcpy loops (default 1).
+        -P              Prefault destination buffer (with module cxl-memcpy.ko).
         -p <procs>      Fork this number of processes (default 1).
         -r              Reallocate destination buffer at each iteration.
         -s <bufsize>    Copy this number of bytes (default 1024).
@@ -86,12 +88,28 @@ Kernel Test
 The CXL kernel API can be tested through the cxl-memcpy.ko driver. It is not
 part of the automated script.
 
-To build the kernel module:
+To build the kernel module cxl_memcpy:
     $ [KERNELDIR=<linux build tree>] make cxl-memcpy.ko
 
 To test (root only):
     $ insmod ./cxl-memcpy.ko
     $ ./memcpy_afu_ctx -K [-p <proc count>] [-l <loop count>]
+
+
+cxllib_handle_fault Test
+------------------------
+
+The kernel API cxllib_handle_fault() can also be tested with cxl-memcpy.ko.
+It is not part of the automated script.
+
+To build the kernel module cxl_memcpy:
+    $ [KERNELDIR=<linux build tree>] make cxl-memcpy.ko
+
+To build the perf tool associated with the kernel:
+    $ [KERNELDIR=<linux build tree>] make perf
+
+To test (root only):
+    $ ./cxllib_handle_fault.sh
 
 
 Contributing

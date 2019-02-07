@@ -22,10 +22,13 @@
 #include <linux/cdev.h>
 #include <linux/file.h>
 #include <linux/delay.h>
+#include <linux/sched/mm.h>
 
 #include <asm/atomic.h>
 #include <asm/uaccess.h>
 #include <asm/barrier.h>
+#include <misc/cxllib.h>
+#include <asm/reg.h>
 
 #include "cxl-memcpy.h"
 #include "memcpy_afu_defs.h"
@@ -376,6 +379,26 @@ static long device_ioctl_get_fd(struct pci_dev *dev,
 	return fd;
 }
 
+static long device_ioctl_handle_fault(struct pci_dev *dev, __u64 __user *arg)
+{
+	int rc;
+	struct mm_struct *mm;
+	struct cxl_memcpy_ioctl_handle_fault bufd;
+
+	/* Copy the user buffer descriptor info */
+	if (copy_from_user(&bufd, arg,
+			   sizeof(struct cxl_memcpy_ioctl_handle_fault)))
+		return -EFAULT;
+
+	mm = get_task_mm(current);
+	if (mm == NULL)
+		return -EINVAL;
+
+	rc = cxllib_handle_fault(mm, bufd.addr, bufd.size, DSISR_ISSTORE);
+	mmput(mm);
+	return rc;
+}
+
 static long device_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	struct pci_dev *dev = file->private_data;
@@ -385,6 +408,8 @@ static long device_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	case CXL_MEMCPY_IOCTL_GET_FD:
 		return device_ioctl_get_fd(dev,
 				(struct cxl_memcpy_ioctl_get_fd __user *)arg);
+	case CXL_MEMCPY_IOCTL_HANDLE_FAULT:
+		return device_ioctl_handle_fault(dev, (__u64 __user *)arg);
 	}
 	return -EINVAL;
 }

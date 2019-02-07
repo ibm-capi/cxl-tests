@@ -23,6 +23,7 @@
 /* ioctl numbers */
 #define CXL_MEMCPY_MAGIC 0xC9
 #define CXL_MEMCPY_IOCTL_GET_FD		_IOW(CXL_MEMCPY_MAGIC, 0x00, int)
+#define CXL_MEMCPY_IOCTL_HANDLE_FAULT	_IOW(CXL_MEMCPY_MAGIC, 0x01, int)
 
 #define CXL_MEMCPY_IOCTL_GET_FD_MASTER	0x0000000000000001UL
 #define CXL_MEMCPY_IOCTL_GET_FD_ALL	0x0000000000000001UL
@@ -30,6 +31,11 @@
 struct cxl_memcpy_ioctl_get_fd {
 	struct cxl_ioctl_start_work work;
 	__u64 master;
+};
+
+struct cxl_memcpy_ioctl_handle_fault {
+	__u64 addr;
+	__u64 size;
 };
 
 #endif
