@@ -106,7 +106,7 @@ To build the kernel module cxl_memcpy:
     $ [KERNELDIR=<linux build tree>] make cxl-memcpy.ko
 
 To build the perf tool associated with the kernel:
-    $ [KERNELDIR=<linux build tree>] make perf
+    $ KERNELDIR=<linux build tree> make perf
 
 To test (root only):
     $ ./cxllib_handle_fault.sh
