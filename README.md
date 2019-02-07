@@ -32,7 +32,7 @@ If you're cross-compiling, set `CROSS_COMPILE` to the appropriate prefix.
 
 For example, to cross-compile with `powerpc64le-linux-gnu-gcc`, statically
 linked:
-
+```
     $ export CROSS_COMPILE=powerpc64le-linux-gnu-
     $ export CFLAGS=-static
     $ make
@@ -80,7 +80,7 @@ Usage
         -m              Use malloced memory instead of static memory
                         for src/dst buffer
         -s <size>       Size of the copy buffer used.
-
+```
 
 Kernel Test
 -----------
@@ -89,12 +89,14 @@ The CXL kernel API can be tested through the cxl-memcpy.ko driver. It is not
 part of the automated script.
 
 To build the kernel module cxl_memcpy:
+```
     $ [KERNELDIR=<linux build tree>] make cxl-memcpy.ko
-
+```
 To test (root only):
+```
     $ insmod ./cxl-memcpy.ko
     $ ./memcpy_afu_ctx -K [-p <proc count>] [-l <loop count>]
-
+```
 
 cxllib_handle_fault Test
 ------------------------
@@ -103,14 +105,18 @@ The kernel API cxllib_handle_fault() can also be tested with cxl-memcpy.ko.
 It is not part of the automated script.
 
 To build the kernel module cxl_memcpy:
+```
     $ [KERNELDIR=<linux build tree>] make cxl-memcpy.ko
-
+```
 To build the perf tool associated with the kernel:
+```
     $ KERNELDIR=<linux build tree> make perf
-
+```
 To test (root only):
+```
     $ ./cxllib_handle_fault.sh
 
+```
 
 Contributing
 ------------
