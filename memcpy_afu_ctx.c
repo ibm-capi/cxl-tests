@@ -34,8 +34,10 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <sys/mman.h>
+#include <sys/ioctl.h>
 
 #include <libcxl.h>
+#include "cxl-memcpy.h"
 #include "memcpy_afu.h"
 
 #define CACHELINESIZE	128
@@ -73,6 +75,7 @@ struct memcpy_test_args {
 	int increment_flag;
 	int atomic_cas_flag;
 	int kernel_flag;
+	int prefault_flag;
 	int realloc_flag;
 	int card;
 	int completion_timeout;
@@ -314,13 +317,14 @@ int test_afu_memcpy(char *src, char *dst, size_t size, int count,
 
 	int process_handle_ioctl;
 	pid_t pid;
-	int afu_fd, i, ret = 0, t;
+	int afu_fd, fd = 0, i, ret = 0, t;
 	struct memcpy_weq weq;
 	struct memcpy_work_element memcpy_we, irq_we, *queued_we;
 	struct memcpy_work_element increment_we, atomic_cas_we;
 	struct cxl_event event;
 	struct timeval timeout;
 	struct timeval start, end, temp;
+	struct cxl_memcpy_ioctl_handle_fault bufd;
 	fd_set set;
 	char *cxldev;
 
@@ -442,9 +446,22 @@ int test_afu_memcpy(char *src, char *dst, size_t size, int count,
 	FD_ZERO(&set);
 	FD_SET(afu_fd, &set);
 	gettimeofday(&start, NULL);
+	if (args->prefault_flag) {
+		fd = open("/dev/cxlmemcpy", O_RDWR | O_CLOEXEC);
+		if (fd < 0)
+			perror("Unable to open /dev/cxlmemcpy device");
+	}
 
 	for (i = 0; i < count; i++) {
 		ret = 0;
+
+		if (fd > 0) {
+			bufd.addr = (__u64)dst;
+			bufd.size = size;
+			ret = ioctl(fd, CXL_MEMCPY_IOCTL_HANDLE_FAULT, &bufd);
+			if (ret)
+				perror("ioctl CXL_MEMCPY_IOCTL_HANDLE_FAULT");
+		}
 		if (args->atomic_cas_flag) {
 			queued_we = memcpy_add_we(&weq, atomic_cas_we);
 		} else if (args->increment_flag) {
@@ -657,9 +674,13 @@ static void usage()
 	fprintf(stderr,
 	        "\t-i <irq_num>\tUse this interrupt command source number (default 0).\n");
 	fprintf(stderr,
+	        "\t-K\t\tTest CXL kernel API (with module cxl-memcpy.ko).\n");
+	fprintf(stderr,
 	        "\t-k\t\tUse the Stop_on_Invalid_Command and Restart logic.\n");
 	fprintf(stderr,
 	        "\t-l <loops>\tRun this number of memcpy loops (default 1).\n");
+	fprintf(stderr,
+	        "\t-P\t\tPrefault destination buffer (with module cxl-memcpy.ko).\n");
 	fprintf(stderr,
 	        "\t-p <procs>\tFork this number of processes (default 1).\n");
 	fprintf(stderr,
@@ -686,6 +707,7 @@ int main(int argc, char *argv[])
 		.increment_flag = 0,
 		.atomic_cas_flag = 0,
 		.kernel_flag = 0,
+		.prefault_flag = 0,
 		.realloc_flag = 0,
 		.card = 0,
 		.completion_timeout = COMPLETION_TIMEOUT,
@@ -693,7 +715,7 @@ int main(int argc, char *argv[])
 	};
 
 	while (1) {
-		c = getopt(argc, argv, "+AahKktp:l:rs:i:I:c:e:");
+		c = getopt(argc, argv, "+AahKktPp:l:rs:i:I:c:e:");
 		if (c < 0)
 			break;
 		switch (c) {
@@ -709,6 +731,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'K':
 			args.kernel_flag = 1;
+			break;
+		case 'P':
+			args.prefault_flag = 1;
 			break;
 		case 'k':
 			/* This arg is to change the behavior of MCP.

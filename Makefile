@@ -53,6 +53,15 @@ $(libcxl_deps): $(libcxl_dir)/Makefile
 
 $(test_deps):
 
+ifeq ($(KERNELDIR),)
+perf:
+	@echo Please set "'KERNELDIR=<linux build tree>'"; false
+else
+perf:
+	make -C $(KERNELDIR)/tools/perf
+	cp $(KERNELDIR)/tools/perf/perf .
+endif
+
 KERNELDIR ?= /lib/modules/$(shell uname -r)/build
 
 %.ko : %.c
@@ -72,7 +81,7 @@ KERNELDIR ?= /lib/modules/$(shell uname -r)/build
 
 clean:
 	/bin/rm -f $(tests:.c=) $(patsubst %.c,%.d,$(tests)) $(test_deps) \
-		$(patsubst %.o,%.d,$(test_deps)) $(kmodule:.ko=.d)
+		$(patsubst %.o,%.d,$(test_deps)) $(kmodule:.ko=.d) perf
 	$(MAKE) -C $(KERNELDIR) M=$(shell pwd) clean
 	$(MAKE) -C $(libcxl_dir) clean
 
