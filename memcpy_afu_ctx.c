@@ -603,6 +603,9 @@ static int get_caia_major(struct memcpy_test_args *args)
 	return 0;
 }
 
+/* kernel cxl driver dedicates one context to the vPHB */
+#define MAX_PROCESSES (MEMCPY_AFUD_NUM_OF_PROCESSES-1)
+
 int run_tests(void *argp)
 {
 	struct memcpy_test_args *args = argp;
@@ -615,12 +618,22 @@ int run_tests(void *argp)
 
 	if (get_caia_major(args))
 		return 1;
-
+	if (processes == 0) {
+		if (args->caia_major == 2) {
+			fprintf(stderr, "Warning: -p0 is not yet supported on P9\n");
+			fprintf(stderr, "Running with -p1\n");
+			processes = 1;
+		} else {
+			processes = MAX_PROCESSES;
+		}
+	}
 	if (! args->kernel_flag) {
 		if (set_afu_master_psa_registers(args))
 			return 1;
+		/* set_afu_master_psa_registers() eats one context */
+		if (args->processes == 0)
+			processes--;
 	}
-
 	/* Allocate memory areas for afu to copy to/from */
 	if (args->caia_major == 2 && buflen > 128)
 		buflen = 128;	/* MemCpy AFU v2 restriction */
@@ -683,6 +696,8 @@ static void usage()
 	        "\t-P\t\tPrefault destination buffer (with module cxl-memcpy.ko).\n");
 	fprintf(stderr,
 	        "\t-p <procs>\tFork this number of processes (default 1).\n");
+	fprintf(stderr,
+	        "\t\t\tUse -p0 to fork as many processes as advertised by AFU.\n");
 	fprintf(stderr,
 	        "\t-r\t\tReallocate destination buffer at each iteration.\n");
 	fprintf(stderr,
@@ -789,6 +804,10 @@ int main(int argc, char *argv[])
 	}
 	if (args.atomic_cas_flag && args.realloc_flag) {
                 fprintf(stderr, "Error: -A and -r are mutually exclusive\n");
+                exit(1);
+        }
+	if (args.processes == 0 && args.irq_count != -1) {
+                fprintf(stderr, "Error: -p0 and -I are mutually exclusive\n");
                 exit(1);
         }
 	get_name(&name, args.processes, args.loops);

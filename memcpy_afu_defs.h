@@ -55,6 +55,9 @@ struct memcpy_work_element {
 	((((uintptr_t)queue) & 0xfffffffffffff000ULL) | \
 	 (((__u64)depth) & 0xfffULL))
 
+/* AFU descriptor */
+#define MEMCPY_AFUD_NUM_OF_PROCESSES	0x01ff
+
 /* AFU PSA registers */
 #define MEMCPY_AFU_PSA_REGS_SIZE 16*1024
 #define MEMCPY_AFU_PSA_REG_CFG		0
