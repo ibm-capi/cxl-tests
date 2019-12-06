@@ -74,7 +74,7 @@ done >/dev/null
 if ((timeout < 0))
 then
 	dmesg | tail
-	echo cxl_eeh_test.sh: cxl_reset test fails
+	echo cxl_eeh_tests.sh: cxl_reset test fails
 	exit 1
 fi
 echo cxl_eeh_tests.sh: driver notified
@@ -88,7 +88,7 @@ do
 done >/dev/null
 if ((timeout < 0))
 then
-	echo cxl_eeh_test.sh: cxl_reset test fails
+	echo cxl_eeh_tests.sh: cxl_reset test fails
 	exit 1
 fi
 echo cxl_eeh_tests.sh: device recovered
@@ -132,7 +132,7 @@ do
 done >/dev/null
 if ((timeout >= 0))
 then
-	echo cxl_eeh_test.sh: err_injct test fails
+	echo cxl_eeh_tests.sh: err_injct test fails
 	exit 1
 fi
 
@@ -146,7 +146,7 @@ do
 done >/dev/null
 if ((timeout < 0))
 then
-	echo cxl_eeh_test.sh: err_inject test fails
+	echo cxl_eeh_tests.sh: err_inject test fails
 	exit 1
 fi
 
@@ -158,7 +158,7 @@ memcpy_afu_ctx -p1 -l1 >/tmp/recovery2.log 2>&1
 if (($?))
 then
 	cat /tmp/recovery2.log
-	echo cxl_eeh_test.sh: err_injct test fails for memcpy afu
+	echo cxl_eeh_tests.sh: err_injct test fails for memcpy afu
 	exit 1
 fi
 
@@ -172,12 +172,12 @@ then
 	if (($?))
 	then
 		cat /tmp/recovery3.log
-		echo cxl_eeh_test.sh: err_injct test fails for timebase
+		echo cxl_eeh_tests.sh: err_injct test fails for timebase
 		exit 1
 	fi
 fi
 
 # Success
 #
-echo cxl_eeh_test.sh: err_injct test pass
+echo cxl_eeh_tests.sh: err_injct test pass
 exit 0
