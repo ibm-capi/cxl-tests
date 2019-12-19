@@ -68,9 +68,11 @@ Usage
 
     Usage: cxl_eeh_tests.sh [options]
     Options:
-        -c <card_num>   Use this CAPI card (default 0).
+        -c <card>       Use this CAPI card (default 0).
+        -l <loops>      Run the test this number of times (default 1).
 
     Usage:./cxl-threads [options]
+    Options:
         -n <num>        Number of threads that execute memcpy.
         -t              Do the work element setup on the main thread.
         -c <index>      Card index to runs tests on.
