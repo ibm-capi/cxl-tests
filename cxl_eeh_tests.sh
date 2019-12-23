@@ -38,15 +38,15 @@ function dump_messages	# after timestamp
 card=card0 # default
 loops=1 # default
 
-while true
+while getopts c:l: opt
 do
-	case $1 in
-	('')	break ;;
-	(-c)	card=card$2; shift 2 || break ;;
-	(-l)	loops=$2; shift 2 || break ;;
+	case $opt in
+	(c)	card=card$OPTARG ;;
+	(l)	loops=$OPTARG ;;
 	(*)	usage;;
 	esac
 done
+shift $((OPTIND-1))
 (( $# == 0 )) || usage
 
 card=/sys/class/cxl/$card
